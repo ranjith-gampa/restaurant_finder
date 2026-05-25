@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Restaurant Finder</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; color: #1f2937; }
+      .container { max-width: 900px; margin: 0 auto; background: #fff; border-radius: 10px; padding: 1.5rem; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+      h1 { margin-top: 0; }
+      .row { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+      input[type="text"] { flex: 1; min-width: 240px; padding: 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; }
+      button { padding: 0.65rem 1rem; border: none; background: #2563eb; color: #fff; border-radius: 6px; cursor: pointer; }
+      .filters { margin: 1rem 0; display: flex; flex-wrap: wrap; gap: 0.75rem; }
+      .filter-chip { background: #eff6ff; border: 1px solid #bfdbfe; padding: 0.4rem 0.6rem; border-radius: 999px; font-size: 0.9rem; }
+      .restaurant { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-top: 0.75rem; }
+      .meta { color: #6b7280; font-size: 0.95rem; margin-top: 0.35rem; }
+      .error { color: #b91c1c; background: #fee2e2; padding: 0.8rem; border-radius: 6px; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Restaurant Finder</h1>
+      <p>Search by any restaurant term. Results are ranked by review matches and can be filtered further.</p>
+
+      <form method="get">
+        <div class="row">
+          <input type="text" name="query" placeholder="e.g., vegetarian restaurants" value="{{ query }}" required />
+          <input type="text" name="location" placeholder="Optional location" value="{{ location }}" />
+          <button type="submit">Search</button>
+        </div>
+
+        {% if filters %}
+        <div class="filters">
+          {% for item in filters %}
+            <label class="filter-chip">
+              <input
+                type="checkbox"
+                name="filter"
+                value="{{ item.term }}"
+                {% if item.term in selected_filters %}checked{% endif %}
+              />
+              {{ item.term }} ({{ item.count }})
+            </label>
+          {% endfor %}
+        </div>
+        <button type="submit">Apply Filters</button>
+        {% endif %}
+      </form>
+
+      {% if error_message %}
+      <p class="error">{{ error_message }}</p>
+      {% endif %}
+
+      {% if query %}
+        <h2>Results ({{ restaurants|length }})</h2>
+      {% endif %}
+
+      {% for restaurant in restaurants %}
+      <article class="restaurant">
+        <h3>{{ restaurant.name }}</h3>
+        <div class="meta">{{ restaurant.formatted_address }}</div>
+        <div class="meta">Rating: {{ restaurant.rating or "N/A" }} · Reviews: {{ restaurant.user_ratings_total or "N/A" }}</div>
+        <div class="meta">Matched terms: {{ restaurant.matched_terms|join(", ") if restaurant.matched_terms else "None" }}</div>
+        <div class="meta">Review match score: {{ restaurant.review_match_score }}</div>
+        {% if restaurant.website %}<div class="meta"><a href="{{ restaurant.website }}" target="_blank" rel="noopener noreferrer">Website</a></div>{% endif %}
+        {% if restaurant.url %}<div class="meta"><a href="{{ restaurant.url }}" target="_blank" rel="noopener noreferrer">Google Maps</a></div>{% endif %}
+      </article>
+      {% endfor %}
+    </div>
+  </body>
+</html>
