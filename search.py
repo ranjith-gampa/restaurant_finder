@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9]+")
@@ -14,15 +16,17 @@ def tokenize_search_query(query: str) -> list[str]:
     return sorted({token.lower() for token in TOKEN_PATTERN.findall(query or "") if len(token) > 1})
 
 
-def _count_term_matches(text: str, term: str) -> int:
-    return len(re.findall(rf"\b{re.escape(term)}\b", text.lower()))
+def _build_term_patterns(terms: Iterable[str]) -> dict[str, re.Pattern[str]]:
+    return {term: re.compile(rf"\b{re.escape(term)}\b") for term in terms}
 
 
 def _normalize_reviews(reviews: Iterable[dict]) -> str:
     return " ".join((review.get("text") or "") for review in reviews)
 
 
-def _score_candidate(query_terms: list[str], name: str, types: list[str], reviews: list[dict]) -> tuple[int, int, set[str]]:
+def _score_candidate(
+    terms: list[str], term_patterns: dict[str, re.Pattern[str]], name: str, types: list[str], reviews: list[dict]
+) -> tuple[int, int, set[str]]:
     normalized_name = (name or "").lower()
     normalized_types = " ".join(types or []).lower()
     review_text = _normalize_reviews(reviews).lower()
@@ -31,9 +35,10 @@ def _score_candidate(query_terms: list[str], name: str, types: list[str], review
     name_score = 0
     matched_terms: set[str] = set()
 
-    for term in query_terms:
-        review_hits = _count_term_matches(review_text, term)
-        name_hits = _count_term_matches(normalized_name, term) + _count_term_matches(normalized_types, term)
+    for term in terms:
+        pattern = term_patterns[term]
+        review_hits = len(pattern.findall(review_text))
+        name_hits = len(pattern.findall(normalized_name)) + len(pattern.findall(normalized_types))
         review_score += review_hits
         name_score += name_hits
         if review_hits > 0 or name_hits > 0:
@@ -45,12 +50,15 @@ def _score_candidate(query_terms: list[str], name: str, types: list[str], review
 def rank_and_filter_restaurants(candidates: list[dict], query: str, required_terms: list[str] | None = None) -> tuple[list[dict], list[dict]]:
     query_terms = tokenize_search_query(query)
     required = {term.lower() for term in (required_terms or [])}
+    all_terms = sorted(set(query_terms) | required)
+    term_patterns = _build_term_patterns(all_terms)
     ranked: list[dict] = []
 
     for candidate in candidates:
         reviews = candidate.get("reviews", [])
         review_score, name_score, matched_terms = _score_candidate(
-            query_terms=query_terms,
+            terms=all_terms,
+            term_patterns=term_patterns,
             name=candidate.get("name", ""),
             types=candidate.get("types", []),
             reviews=reviews,
@@ -91,6 +99,20 @@ def rank_and_filter_restaurants(candidates: list[dict], query: str, required_ter
 @dataclass
 class GooglePlacesClient:
     api_key: str
+    timeout_seconds: int = 20
+    max_results_limit: int = 20
+
+    def __post_init__(self) -> None:
+        retry = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods={"GET"},
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self.session = requests.Session()
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     @classmethod
     def from_env(cls) -> "GooglePlacesClient":
@@ -101,15 +123,19 @@ class GooglePlacesClient:
 
     def _get(self, endpoint: str, params: dict) -> dict:
         params = {**params, "key": self.api_key}
-        response = requests.get(endpoint, params=params, timeout=20)
-        response.raise_for_status()
+        try:
+            response = self.session.get(endpoint, params=params, timeout=self.timeout_seconds)
+            response.raise_for_status()
+        except requests.RequestException as error:
+            raise RuntimeError("Failed to reach Google Maps API.") from error
         payload = response.json()
         status = payload.get("status", "")
         if status and status not in {"OK", "ZERO_RESULTS"}:
-            raise RuntimeError(payload.get("error_message") or f"Google Maps API returned {status}")
+            raise RuntimeError(f"Google Maps API returned {status}")
         return payload
 
     def search_restaurants(self, query: str, location: str | None = None, max_results: int = 20) -> list[dict]:
+        max_results = max(1, min(max_results, self.max_results_limit))
         text_query = f"{query} restaurant"
         if location:
             text_query = f"{text_query} in {location}"

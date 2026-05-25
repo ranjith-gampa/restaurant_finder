@@ -1,9 +1,13 @@
+import logging
+
+import requests
 from flask import Flask, render_template, request
 
 from search import GooglePlacesClient, rank_and_filter_restaurants
 
 
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
 
 
 @app.get("/")
@@ -25,8 +29,11 @@ def index():
                 query=query,
                 required_terms=selected_filters,
             )
-        except Exception as error:  # noqa: BLE001
+        except ValueError as error:
             error_message = str(error)
+        except (requests.RequestException, RuntimeError):
+            logger.exception("Restaurant search failed for query '%s'", query)
+            error_message = "Unable to fetch restaurant data right now. Please try again."
 
     return render_template(
         "index.html",

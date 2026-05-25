@@ -54,6 +54,28 @@ class SearchRankingTests(unittest.TestCase):
         self.assertEqual(len(ranked), 1)
         self.assertEqual(ranked[0]["name"], "Plant House")
 
+    def test_required_terms_can_match_even_if_not_in_query(self):
+        candidates = [
+            {
+                "name": "Ocean Plate",
+                "rating": 4.1,
+                "user_ratings_total": 22,
+                "types": ["restaurant"],
+                "reviews": [{"text": "Excellent gluten free options and fresh seafood."}],
+            },
+            {
+                "name": "Basic Cafe",
+                "rating": 4.2,
+                "user_ratings_total": 35,
+                "types": ["restaurant"],
+                "reviews": [{"text": "Good coffee and pastries."}],
+            },
+        ]
+
+        ranked, _ = rank_and_filter_restaurants(candidates, "seafood restaurants", required_terms=["gluten"])
+        self.assertEqual(len(ranked), 1)
+        self.assertEqual(ranked[0]["name"], "Ocean Plate")
+
 
 if __name__ == "__main__":
     unittest.main()
